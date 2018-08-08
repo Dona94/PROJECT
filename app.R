@@ -1,9 +1,11 @@
-
 library(shiny)
 library(ChemmineR)
 library(webchem)
+library(fscaret)
 library(ChemmineOB)
 library(rcdk)
+library(ensembleR)
+library(caretEnsemble)
 library(caret)
 library(gplots)
 library(ggplot2)
@@ -37,7 +39,10 @@ if (interactive()) {
   ui <- fluidPage(
     sidebarLayout(
       sidebarPanel(
-        
+        tags$style(type="text/css",
+                   ".shiny-output-error { visibility: hidden; }",
+                   ".shiny-output-error:before { visibility: hidden; }"
+        ),
         h4(strong('Machine learning models available')),
         # the actioButton called rpart which is the name of the variable you need to use in the server component
         actionButton('rf', label = 'Random Forest', icon("tree-conifer", lib="glyphicon"),
@@ -46,7 +51,11 @@ if (interactive()) {
                      style="color: #fff; background-color: #0066ff; border-color: #2e6da4"),
         actionButton('svm', label = 'Support Vector Machine ', icon("resize-full", lib="glyphicon"),
                      style="color: #fff; background-color: #ffa500; border-color: #2e6da4"),
-        tags$hr(),
+        h4(strong('Modeling methods')),
+        actionButton('pre', label = 'Predictive Modeling', icon("&#x2a;", lib="glyphicon"),
+                     style="color: #fff; background-color: #cd5c5c; border-color: #2e6da4"),
+        actionButton('en', label = 'Ensemble Modeling', icon("", lib="glyphicon"),
+                     style="color: #fff; background-color: #8a2be2; border-color: #2e6da4"),
         h4(numericInput("ratio", "Specify the % for training sample", value=50/100, min = 50/100, max = 90/100, step=0.1)),
         h4(strong('Select the input format')),
         radioButtons("colour",label=NA,choices=c("InChI","InChI KEY","CAS ID","PUBCHEM SID/CID"),selected="InChI"),
@@ -55,18 +64,16 @@ if (interactive()) {
       mainPanel(
         tableOutput("contents"),
         tabsetPanel(
-          tabPanel("Predictive Modeling", verbatimTextOutput("headi")), 
           #tabPanel("Info on the machine learning models", tableOutput("results")), 
+          tabPanel("Predictive Modeling-RF,SVM,kNN", verbatimTextOutput("outputs"),verbatimTextOutput("outputs2"),
+                   verbatimTextOutput("outputs3")), 
+          tabPanel("Confusion Matrix-RF,SVM,kNN", verbatimTextOutput("crf"),verbatimTextOutput("csvm"),
+                   verbatimTextOutput("cknn")), 
           tabPanel("ROC Curve", plotOutput('ploti')),
+          tabPanel("Descriptors", plotOutput('des')),
           tabPanel("Ensemble Modeling", verbatimTextOutput("ensem"))
           #tabPanel("Info on the machine learning models", verbatimTextOutput("confusion"))
-        ),
-        strong(helpText("Prediction Results Using Random Forest")),
-        verbatimTextOutput("outputs"),
-        strong(helpText("Prediction Results Using Support Vector Machine")),
-        verbatimTextOutput("outputs2"),
-        strong(helpText("Prediction Results Using kNN")),
-        verbatimTextOutput("outputs3")
+        )
       )
     )
   )
@@ -121,11 +128,7 @@ if (interactive()) {
         write.table(res[is.na(res$SMILES),], "random_NA1.csv", sep="\t", row.names=F)
       }
       data<-read.csv("smilesres.csv", sep="\t", header=T)
-      output$headi <- renderPrint({
-        pls <- data[1:5,c(2,5)]
-        head(pls)
-      })
-      #Parse SMILES
+     #Parse SMILES
       data_filt <- data[!is.na(data$SMILES),]
       mols <- parse.smiles(as.character(data_filt$SMILES))
       names(mols) <-  data_filt$ID
@@ -135,24 +138,8 @@ if (interactive()) {
       CDKdescs$ID <- rownames(CDKdescs)
       data_descs <- merge(data_filt, CDKdescs, by="ID")
       write.table(data_descs, "descriptors.csv", sep="\t", row.names=F, quote=F)
-      #Data Preprocessing using caret package (This is optional - might not be best to do this if small number of samples per class and sparse PLS methods can handle correlated predictors)
-      data.mat <- data_descs
-      rownames(data.mat) <- data.mat$ID
-      data.mat <- data.mat[,-c(1:5)] #N.B. Change based on col positions
-      #Remove zero and near-zero variance predictors
-      print(paste("Starting with", ncol(data.mat), "descriptors. Beginning filtering process...", sep=" "))
-      nzv <- nearZeroVar(data.mat, saveMetrics= TRUE)
-      write.table(nzv, "descriptor_variance_summary.csv", sep="\t", quote=F, col.names=NA)
-      nzv <- nearZeroVar(data.mat)
-      filt.data.mat <- data.mat[,-nzv]
-      print(paste("Removed", length(nzv), "near-zero variance predictors...", ncol(filt.data.mat), "descriptors remaining.", sep=" "))
-      #removal of highly correlated predictors (likely repeated descriptors from multiple algorithms)
-      descrCor <-  cor(na.omit(filt.data.mat))
-      highCor <- findCorrelation(descrCor, cutoff = .999, verbose=T)
-      filt.data.mat <- filt.data.mat[,-highCor]
-      print(paste("Removed", length(highCor), "highly correlated predictors...", ncol(filt.data.mat), "descriptors remaining.", sep=" "))
-      write.table(filt.data.mat, "descriptors_filtered.csv", sep="\t", quote=F, col.names=NA)
       descri<- read.csv("descriptors.csv", sep="\t", header=T)
+      descri <- subset(descri, select = -c(ID, PUBCHEM_SID,InChI,SMILES))
       descri <- descri[,colSums(is.na(descri))<nrow(descri)]
       r<-as.numeric(input$ratio)
       ind <- sample(2, nrow(descri), replace = TRUE, prob=c(r,1-r))
@@ -177,6 +164,18 @@ if (interactive()) {
       tak<-table(knnPredict,testset$PUBCHEM_ACTIVITY_OUTCOME)
       output$outputs3 <- renderPrint({
         tak
+      })
+      rf <-confusionMatrix(testset$PUBCHEM_ACTIVITY_OUTCOME,predictions)
+      output$crf <- renderPrint({
+        rf
+      })
+      sm <-confusionMatrix(testset$PUBCHEM_ACTIVITY_OUTCOME,pred)
+      output$csvm <- renderPrint({
+        sm
+      })
+      knn <-confusionMatrix(testset$PUBCHEM_ACTIVITY_OUTCOME,knnPredict)
+      output$cknn <- renderPrint({
+        knn
       })
       output$ploti <- renderPlot({
         predictionsrf<-predict(modelRandom,testset,type='prob')
@@ -208,6 +207,41 @@ if (interactive()) {
         L<-list(bquote("Random Forest"== .(rfauc)), bquote("kNN"== .(nbauc)),bquote("SVM"== .(svmauc)))
         legend("bottomright",legend=sapply(L, as.expression),col=c('red','green','black'),lwd=2,bg="gray",pch=14,cex=0.6)
       })
+      desc<- read.csv("descriptors.csv", sep="\t", header=T)
+      desc <- subset(desc, select = -c(ID, PUBCHEM_SID,InChI,SMILES))
+      desc <- desc[,colSums(is.na(desc))<nrow(desc)]
+      #desc$PUBCHEM_ACTIVITY_OUTCOME <- factor(ifelse(desc$PUBCHEM_ACTIVITY_OUTCOME=='Active', 1,0))
+      fs<-desc %>% select(-PUBCHEM_ACTIVITY_OUTCOME,everything())
+      tDummy <- dummyVars("~.",data=fs, fullRank=F)
+      tDF <- as.data.frame(predict(tDummy,fs))
+      ind<-sample(2,nrow(fs),replace=TRUE,prob=c(0.8,0.2))
+      trainset<-fs[ind==1,]
+      testset<-fs[ind==2,]
+      fsModels <- c("rf","knn","svmLinear") 
+      myFS<-fscaret(trainset, testset, preprocessData=TRUE,
+                    Used.funcRegPred = fsModels, with.labels=TRUE,
+                    supress.output=FALSE,no.cores=2)
+      results <- myFS$VarImp$matrixVarImp.MSE
+      results$Input_no <- as.numeric(results$Input_no)
+      results <- results[c("SUM","SUM%","ImpGrad","Input_no")]
+      myFS$PPlabels$Input_no <- as.numeric(rownames(myFS$PPlabels))
+      results <- merge(x=results, y=myFS$PPlabels, by="Input_no", all.x=T)
+      results <- results[c('Labels', 'SUM')]
+      results <- subset(results,results$SUM !=0)
+      results <- results[order(-results$SUM),]
+      print(results)
+      results1 = head(results, 10)
+      output$des <- renderPlot({
+        p <- ggplot(results1, aes(x=Labels, y=SUM)) +
+          geom_bar(stat="identity", fill="#53cfff") +
+          coord_flip() +
+          theme_light(base_size=16) +
+          xlab("Predictors") +
+          ylab("") +
+          ggtitle("Top ten descriptors predictive of activity") +
+          theme(plot.title=element_text(size=12))
+        p
+      })
     })
     output$contents <- renderTable({
       if(is.null(atad())){return ()}
@@ -217,3 +251,7 @@ if (interactive()) {
   }
   shinyApp(ui, server)
 }
+
+
+
+
