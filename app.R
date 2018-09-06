@@ -45,18 +45,16 @@ if (interactive()) {
         ),
         h4(strong('Machine learning models available')),
         # the actioButton called rpart which is the name of the variable you need to use in the server component
+        actionButton('svm', label = 'Treebag', icon("leaf", lib="glyphicon"),
+                     style="color: #fff; background-color: #ffa500; border-color: #2e6da4"),
         actionButton('rf', label = 'Random Forest', icon("tree-conifer", lib="glyphicon"),
                      style="color: #fff; background-color: #33cc33; border-color: #2e6da4"),
         actionButton('nb', label = 'k-Nearest Neighbors', icon("random", lib="glyphicon"),
                      style="color: #fff; background-color: #0066ff; border-color: #2e6da4"),
-        actionButton('svm', label = 'Support Vector Machine ', icon("resize-full", lib="glyphicon"),
-                     style="color: #fff; background-color: #ffa500; border-color: #2e6da4"),
-        h4(strong('Modeling methods')),
-        actionButton('pre', label = 'Predictive Modeling', icon("&#x2a;", lib="glyphicon"),
-                     style="color: #fff; background-color: #cd5c5c; border-color: #2e6da4"),
-        actionButton('en', label = 'Ensemble Modeling', icon("", lib="glyphicon"),
-                     style="color: #fff; background-color: #8a2be2; border-color: #2e6da4"),
-        h4(numericInput("ratio", "Specify the % for training sample", value=50/100, min = 50/100, max = 90/100, step=0.1)),
+        
+       
+        
+        h4(numericInput("ratio", "Specify the % for training set", value=50/100, min = 50/100, max = 90/100, step=0.1)),
         h4(strong('Select the input format')),
         radioButtons("colour",label=NA,choices=c("InChI","InChI KEY","CAS ID","PUBCHEM SID/CID"),selected="InChI"),
         h4(fileInput("filed", strong("Upload CSV File")))
@@ -65,13 +63,13 @@ if (interactive()) {
         tableOutput("contents"),
         tabsetPanel(
           #tabPanel("Info on the machine learning models", tableOutput("results")), 
-          tabPanel("Predictive Modeling-RF,SVM,kNN", verbatimTextOutput("outputs"),verbatimTextOutput("outputs2"),
+          tabPanel("Predictive Modeling-RF,kNN,treebag", verbatimTextOutput("outputs"),verbatimTextOutput("outputs2"),
                    verbatimTextOutput("outputs3")), 
-          tabPanel("Confusion Matrix-RF,SVM,kNN", verbatimTextOutput("crf"),verbatimTextOutput("csvm"),
+          tabPanel("Confusion Matrix-RF,kNN,treebag", verbatimTextOutput("crf"),verbatimTextOutput("csvm"),
                    verbatimTextOutput("cknn")), 
           tabPanel("ROC Curve", plotOutput('ploti')),
-          tabPanel("Descriptors", plotOutput('des')),
-          tabPanel("Ensemble Modeling", verbatimTextOutput("ensem"))
+          tabPanel("Descriptors", plotOutput('des'))
+          
           #tabPanel("Info on the machine learning models", verbatimTextOutput("confusion"))
         )
       )
@@ -81,8 +79,11 @@ if (interactive()) {
     atad <- reactive({
       ControlParamteres <- trainControl(method = "cv",number =5,savePredictions = TRUE,classProbs = TRUE)
       parameterGrid <- expand.grid(mtry=c(2,3,4))
+      fitControl <- trainControl(method = "cv",number = 5,savePredictions = 'final',
+                                 classProbs = T)
       ctrl <- trainControl(method="repeatedcv",repeats = 3,classProbs=TRUE,summaryFunction = twoClassSummary)
       trControl <- trainControl(method  = "cv",number= 10,classProbs = TRUE,summaryFunction = twoClassSummary)
+      outcomeName <- 'PUBCHEM_ACTIVITY_OUTCOME'
       if (input$colour == "PUBCHEM SID/CID"){
         filej <- input$filed
         if(is.null(filej)){return()}
@@ -141,6 +142,7 @@ if (interactive()) {
       descri<- read.csv("descriptors.csv", sep="\t", header=T)
       descri <- subset(descri, select = -c(ID, PUBCHEM_SID,InChI,SMILES))
       descri <- descri[,colSums(is.na(descri))<nrow(descri)]
+      predictors <- setdiff(names(descri),outcomeName)
       r<-as.numeric(input$ratio)
       ind <- sample(2, nrow(descri), replace = TRUE, prob=c(r,1-r))
       trainset = descri[ind==1,]
@@ -149,13 +151,14 @@ if (interactive()) {
       predictions<-predict(modelRandom,testset)
       actual <-testset$PUBCHEM_ACTIVITY_OUTCOME
       testing1<-table(predictions=predictions,actual=testset$PUBCHEM_ACTIVITY_OUTCOME)
-      output$outputs <- renderPrint({
-        testing1
+     output$outputs <- renderPrint({
+       testing1
       })
-      svm_model <- svm(PUBCHEM_ACTIVITY_OUTCOME~., data=trainset,type="C-classification",kernel="linear", cost=1, cross=10)
-      pred <- predict(svm_model,testset)
-      # Model accuracy
-      testing2<-table(predictions=pred,actual=testset$PUBCHEM_ACTIVITY_OUTCOME)
+      model_lr<-train(trainset[,predictors],trainset[,outcomeName],method='treebag',trControl=fitControl,tuneLength=3)
+      #Predicting using knn model
+      testset$pred_lr<-predict(object = model_lr,testset[,predictors])
+      predtbag<-predict(model_lr,testset)
+      testing2 <- table(predtbag,testset$PUBCHEM_ACTIVITY_OUTCOME)
       output$outputs2 <- renderPrint({
         testing2
       })
@@ -169,9 +172,9 @@ if (interactive()) {
       output$crf <- renderPrint({
         rf
       })
-      sm <-confusionMatrix(testset$PUBCHEM_ACTIVITY_OUTCOME,pred)
+     tbg <- confusionMatrix(testset$PUBCHEM_ACTIVITY_OUTCOME,testset$pred_lr)
       output$csvm <- renderPrint({
-        sm
+      tbg
       })
       knn <-confusionMatrix(testset$PUBCHEM_ACTIVITY_OUTCOME,knnPredict)
       output$cknn <- renderPrint({
@@ -179,33 +182,29 @@ if (interactive()) {
       })
       output$ploti <- renderPlot({
         predictionsrf<-predict(modelRandom,testset,type='prob')
+        predictionsrf
         pred.rf<-prediction(predictionsrf[,2],testset$PUBCHEM_ACTIVITY_OUTCOME)
+        pred.rf
         rf.auc<-performance(pred.rf,'tpr','fpr')
+        rf.auc
         predictknn<-predict(knnFit,testset,type='prob')
         pred.knn<-prediction(predictknn[,2],testset$PUBCHEM_ACTIVITY_OUTCOME)
         knn.auc<-performance(pred.knn,'tpr','fpr')
-        svmmodel<-svm(PUBCHEM_ACTIVITY_OUTCOME~., data=trainset, method="C-classification",
-                      kernel="radial", gamma = 0.01, cost = 100,cross=5, probability=TRUE)
-        svmmodel.predict<-predict(svmmodel,subset(testset,select=-PUBCHEM_ACTIVITY_OUTCOME),decision.values=TRUE)
-        svmmodel.probs<-attr(svmmodel.predict,"decision.values")
-        svmmodel.class<-predict(svmmodel,testset,type="class")
-        svmmodel.labels<-testset$PUBCHEM_ACTIVITY_OUTCOME
-        #roc analysis for test data
-        svmmodel.prediction<-prediction(svmmodel.probs,svmmodel.labels)
-        svmmodel.performance<-performance(svmmodel.prediction,"tpr","fpr")
-        svmmodel.auc<-performance(svmmodel.prediction,"auc")@y.values[[1]]
+        predtbag<-predict(model_lr,testset,type='prob')
+        predtbag<-prediction(predtbag[,2],testset$PUBCHEM_ACTIVITY_OUTCOME)
+        tbag.auc<-performance(predtbag,'tpr','fpr')
         rfauc<-performance(pred.rf,"auc")@y.values[[1]]
         nbauc<-performance(pred.knn,"auc")@y.values[[1]]
-        svmauc<-performance(svmmodel.prediction,"auc")@y.values[[1]]
-        Methods<- c('Random Forest','kNN','SVM')
-        AUCScore<-c(rfauc,nbauc,svmauc)
+        tbgauc<-performance(predtbag,"auc")@y.values[[1]]
+        Methods<- c('Random Forest','kNN','TreeBag')
+        AUCScore<-c(rfauc,nbauc,tbgauc)
         data.frame(Methods,AUCScore)
         #PLot and adding legend 
-        plot(rf.auc,col='red',lty=1,main='ROC Curve Comparison of Random Forest V/s kNN V/s SVM')
+        plot(rf.auc,col='red',lty=1,main='ROC Curve Comparison of RF, SVM, treebag')
         plot(knn.auc,col='green',add=TRUE,lty=1)
-        plot(svmmodel.performance,col='black',add=TRUE,lty=1)
-        L<-list(bquote("Random Forest"== .(rfauc)), bquote("kNN"== .(nbauc)),bquote("SVM"== .(svmauc)))
-        legend("bottomright",legend=sapply(L, as.expression),col=c('red','green','black'),lwd=2,bg="gray",pch=14,cex=0.6)
+        plot(tbag.auc,col='black',add=TRUE,lty=1)
+        L<-list(bquote("Random Forest"== .(rfauc)), bquote("Naive Bayes"== .(nbauc)),bquote("Tree Bag"== .(tbgauc)))
+        legend("bottomright",legend=sapply(L, as.expression),col=c('red','green','black'),lwd=2,bg="gray",pch=20,cex=1)
       })
       desc<- read.csv("descriptors.csv", sep="\t", header=T)
       desc <- subset(desc, select = -c(ID, PUBCHEM_SID,InChI,SMILES))
@@ -217,10 +216,10 @@ if (interactive()) {
       ind<-sample(2,nrow(fs),replace=TRUE,prob=c(0.8,0.2))
       trainset<-fs[ind==1,]
       testset<-fs[ind==2,]
-      fsModels <- c("rf","knn","svmLinear") 
+      fsModels <- c("rf","knn","treebag") 
       myFS<-fscaret(trainset, testset, preprocessData=TRUE,
                     Used.funcRegPred = fsModels, with.labels=TRUE,
-                    supress.output=FALSE,no.cores=2)
+                    supress.output=FALSE,no.cores=1)
       results <- myFS$VarImp$matrixVarImp.MSE
       results$Input_no <- as.numeric(results$Input_no)
       results <- results[c("SUM","SUM%","ImpGrad","Input_no")]
