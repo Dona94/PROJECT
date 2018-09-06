@@ -1,9 +1,7 @@
 # PROJECT
 R-Shiny app  that incorporates QSAR approaches coupled with machine learning techniques to build models which can predict chemical activity and to determine which particular features of a compound are predictive of activity.
 
-High-throughput experiments aims to identify the actives among a large number of
-chemical compounds. QSAR models, are considered as an alternative to this large
-scale virtual-screening of biologically active compounds since it promises a faster
+High-throughput experiments aims to identify the actives among a large number of chemical compounds. QSAR models, are considered as an alternative to this large scale virtual-screening of biologically active compounds since it promises a faster
 and cheaper computational approach. The models are built with the assumption
 that the structure of the compounds has features attributing towards it’s biological
 activity, physical and chemical models. Since the QSAR models saves substantial
