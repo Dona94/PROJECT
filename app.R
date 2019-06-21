@@ -44,7 +44,6 @@ if (interactive()) {
                    ".shiny-output-error:before { visibility: hidden; }"
         ),
         h4(strong('Machine learning models available')),
-        # the actioButton called rpart which is the name of the variable you need to use in the server component
         actionButton('svm', label = 'Treebag', icon("leaf", lib="glyphicon"),
                      style="color: #fff; background-color: #ffa500; border-color: #2e6da4"),
         actionButton('rf', label = 'Random Forest', icon("tree-conifer", lib="glyphicon"),
@@ -69,8 +68,6 @@ if (interactive()) {
                    verbatimTextOutput("cknn")), 
           tabPanel("ROC Curve", plotOutput('ploti')),
           tabPanel("Descriptors", plotOutput('des'))
-          
-          #tabPanel("Info on the machine learning models", verbatimTextOutput("confusion"))
         )
       )
     )
